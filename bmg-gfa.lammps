@@ -1,0 +1,131 @@
+##############
+#############################
+###########################################################
+############## BMG GFA Setup
+############## Copyright Oion Akif 2022
+############## All rights reserved
+###########################################################
+#############################
+##############
+
+###########################################################
+# Variables
+###########################################################
+
+variable input_config        string MgNi-0.50
+
+variable epsilon_AA          equal 0.764
+variable epsilon_AB          equal 0.933
+variable epsilon_BB          equal 1.000
+
+variable sigma_AA            equal 1.000
+variable sigma_AB            equal 0.950
+variable sigma_BB            equal 0.900
+
+variable dt_min              equal 0.002
+variable dt_npt1             equal 0.002
+variable dt_npt2             equal 0.002
+
+variable N_npt1              equal 1*1000*1000
+variable N_npt2              equal    200*1000
+
+variable log_freq            equal 10
+
+variable dump_npt1           equal 5000
+variable dump_npt2           equal 5000
+
+variable restart_npt1        equal 1000000
+variable restart_npt2        equal 1000000
+
+variable T                   equal 5.0
+variable T_quench            equal 0.01
+variable T_damp              equal 0.2
+
+variable P                   equal 10
+variable P_damp              equal 2.0
+
+variable seed                equal 42
+
+
+###########################################################
+# Simulation setup
+###########################################################
+
+units          lj
+atom_style     full
+boundary       p p p
+
+
+###########################################################
+# Force field
+###########################################################
+
+read_data      config/${input_config}.lammps
+
+pair_style     lj/smooth/linear 2.5 # LJ (w/ cutoff)
+
+pair_coeff     1 1           ${sigma_AA} ${epsilon_AA}
+pair_coeff     1 2           ${sigma_AB} ${epsilon_AB}
+pair_coeff     2 2           ${sigma_BB} ${epsilon_BB}
+
+# pair_modify         tail yes mix geometric # mixing rules set to geometric, and also a tail correction for certain pair coefficients
+
+
+###########################################################
+# Simulation parameters
+###########################################################
+
+# newton         on # Newton's third law
+neighbor       0.3 bin #
+neigh_modify   every 1 delay 0 check yes
+
+# thermo_style custom step vol temp c_watert c_carbont pe etotal press lx ly lz pxx pyy pzz ebond eangle edihed epair
+thermo_style   custom step vol temp pe etotal press lx ly lz
+thermo_modify  flush yes
+thermo         ${log_freq}
+
+log            log/${input_config}-0.log
+
+
+###########################################################
+# Run simulation
+###########################################################
+
+# Minimization
+
+reset_timestep 0
+timestep       ${dt_min}
+
+min_style      fire
+minimize       1.0e-10 1.0e-10 5000000 10000000
+
+# Initialize velocities
+
+velocity       all create ${T} ${seed} dist gaussian
+velocity       all zero linear
+
+# Equilibration
+
+reset_timestep 0
+timestep       ${dt_npt1}
+log            log/${input_config}-npt1.log
+
+fix            fix_npt1 all npt temp ${T} ${T} ${T_damp} iso ${P} ${P} ${P_damp}
+dump           dump_npt1 all custom ${dump_npt1} dump/${input_config}-npt1.lammpstrj id type xs ys zs
+restart        ${restart_npt1} restart/${input_config}-npt1-*.restart
+run            ${N_npt1}
+undump         dump_npt1
+unfix          fix_npt1
+
+# Quenching
+
+reset_timestep 0
+timestep       ${dt_npt2}
+log            log/${input_config}-npt2.log
+
+fix            fix_npt2 all npt temp ${T} ${T_quench} ${T_damp} iso ${P} ${P} ${P_damp}
+dump           dump_npt2 all custom ${dump_npt2} dump/${input_config}-npt2.lammpstrj id type xs ys zs
+restart        ${restart_npt2} restart/${input_config}-npt2-*.restart
+run            ${N_npt2}
+undump         dump_npt2
+unfix          fix_npt2
